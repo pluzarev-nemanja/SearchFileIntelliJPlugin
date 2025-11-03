@@ -19,7 +19,7 @@ class SearchToolWindowFactory : ToolWindowFactory {
         )
         toolWindow.contentManager.addContent(
             ContentFactory.getInstance().createContent(
-                SearchToolWindow(searchViewModel).rootPanel,
+                SearchToolWindow(project, searchViewModel).rootPanel,
                 null,
                 false
             )

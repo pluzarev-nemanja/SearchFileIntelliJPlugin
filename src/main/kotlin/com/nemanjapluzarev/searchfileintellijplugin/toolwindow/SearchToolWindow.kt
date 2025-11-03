@@ -1,15 +1,20 @@
 package com.nemanjapluzarev.searchfileintellijplugin.toolwindow
 
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
+import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.vfs.LocalFileSystem
+import com.intellij.ui.components.JBList
+import com.nemanjapluzarev.searchfileintellijplugin.domain.model.Occurrence
 import com.nemanjapluzarev.searchfileintellijplugin.domain.viewModel.SearchViewModel
 import com.nemanjapluzarev.searchfileintellijplugin.presentation.uiState.SearchUiState
 import kotlinx.coroutines.*
 import java.awt.Dimension
 import java.nio.file.Path
 import javax.swing.*
-import kotlin.io.path.isDirectory
 
 class SearchToolWindow(
+    private val project: Project,
     private val searchViewModel: SearchViewModel
 ) : SimpleToolWindowPanel(true, true) {
 
@@ -19,12 +24,14 @@ class SearchToolWindow(
     val pathField = JTextField()
     val queryField = JTextField()
     val startButton = JButton("Start search")
-    val outputArea = JTextArea()
+    private val resultListModel = DefaultListModel<Occurrence>()
+    private val resultList = JBList(resultListModel)
 
     init {
         initializeUI()
         initializeButtonListener()
         observeUiStates()
+        setupResultClick()
     }
 
     private fun observeUiStates() {
@@ -42,14 +49,21 @@ class SearchToolWindow(
 
                         is SearchUiState.Success -> {
                             startButton.text = "Start search"
-                            outputArea.text = state.results.joinToString("\n") {
-                                "${it.file}: ${it.line}:${it.offset}"
+                            resultListModel.clear()
+                            state.results.forEach { occurrence ->
+                                resultListModel.addElement(occurrence)
                             }
                         }
 
                         is SearchUiState.Error -> {
                             startButton.text = "Start search"
-                            outputArea.text = "Error: ${state.message}"
+                            resultListModel.clear()
+                            JOptionPane.showMessageDialog(
+                                this@SearchToolWindow,
+                                "Error: ${state.message}",
+                                "Search Error",
+                                JOptionPane.ERROR_MESSAGE
+                            )
                         }
                     }
                 }
@@ -66,7 +80,7 @@ class SearchToolWindow(
                     val path = Path.of(pathField.text.trim())
                     val query = queryField.text.trim()
 
-                    if (!path.isDirectory() || query.isEmpty()) {
+                    if (pathField.text.trim().isEmpty() || query.isEmpty()) {
                         JOptionPane.showMessageDialog(
                             this,
                             "Please enter both directory path and search query.",
@@ -76,7 +90,7 @@ class SearchToolWindow(
                         return@addActionListener
                     }
 
-                    outputArea.text = ""
+                    resultListModel.clear()
                     startButton.text = "Cancel"
                     searchViewModel.startSearch(path, query)
                 }
@@ -109,8 +123,9 @@ class SearchToolWindow(
         queryPanel.add(Box.createRigidArea(Dimension(5, 0)))
         queryPanel.add(startButton)
 
-        outputArea.isEditable = false
-        val scrollPane = JScrollPane(outputArea)
+        resultList.fixedCellHeight = 20
+        resultList.visibleRowCount = 15
+        val scrollPane = JScrollPane(resultList)
         scrollPane.preferredSize = Dimension(400, 300)
 
         mainPanel.add(pathPanel)
@@ -120,5 +135,33 @@ class SearchToolWindow(
         mainPanel.add(scrollPane)
 
         setContent(mainPanel)
+    }
+
+    private fun setupResultClick() {
+        resultList.cellRenderer = JLabelRenderer()
+        resultList.addListSelectionListener { event ->
+            if (!event.valueIsAdjusting) {
+                val occurrence = resultList.selectedValue ?: return@addListSelectionListener
+                val virtualFile = LocalFileSystem.getInstance().findFileByPath(occurrence.file.toString())
+                    ?: return@addListSelectionListener
+                OpenFileDescriptor(project, virtualFile, occurrence.line - 1, occurrence.offset).navigate(true)
+            }
+        }
+    }
+
+    private class JLabelRenderer : ListCellRenderer<Occurrence> {
+        override fun getListCellRendererComponent(
+            list: JList<out Occurrence>,
+            value: Occurrence,
+            index: Int,
+            isSelected: Boolean,
+            cellHasFocus: Boolean
+        ): java.awt.Component {
+            val label = JLabel("${value.file}: ${value.line}:${value.offset}")
+            label.isOpaque = true
+            label.background = if (isSelected) list.selectionBackground else list.background
+            label.foreground = if (isSelected) list.selectionForeground else list.foreground
+            return label
+        }
     }
 }
